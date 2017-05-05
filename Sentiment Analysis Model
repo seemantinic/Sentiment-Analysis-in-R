@@ -1,0 +1,300 @@
+rm(list = ls())
+#install.packages("SnowballC")
+library(rjson)
+library(bit64)
+library(twitteR)
+library(ROAuth)
+library(httr)
+library(devtools)
+library(twitteR)
+library(openssl)
+library(base64enc)
+library(RColorBrewer)
+library(wordcloud)
+library(NLP)
+library(openNLP)
+library(tau)
+library(tm)
+library(plyr)
+library(stringr)
+library(httr)
+library(MASS)
+library(caTools)
+library(SnowballC)
+library(LiblineaR)
+library(randomForest)
+library(nnet)
+
+######################################
+
+setwd("E:/UConn/Data Mining/final project/Twitter airline sentiment analysis")
+
+#Reading the data
+airline_tweets=read.csv('Tweets.csv',stringsAsFactors = F)
+
+# Creating a subset with required variables for modelling
+airline_tweets = subset(airline_tweets, select=c('airline_sentiment','airline','text'))
+
+airline_tweets = airline_tweets[airline_tweets$airline_sentiment!="neutral",]
+
+
+# create 2 subset to get positive and negative sentiment
+positive = subset(airline_tweets, airline_sentiment == 'positive')
+negative = subset(airline_tweets, airline_sentiment == 'negative')
+dim(rpositive_senti); #2363 are positive sentiments
+dim(negative_senti); #9178 are negative sentiments
+
+
+
+plot(table(airline_tweets$airline_sentiment))
+
+plot(table(airline_tweets$airline))
+
+######################################
+# filtering data for only Delta, southwest, united and aa
+
+#View(airline_tweeta_new)
+#######################################
+# Text Preprocessing
+
+airline_tweets$text = gsub("^@\\w+ *", "", airline_tweets$text)
+
+# removing some words
+
+wordsRemove = c('get', 'cant', 'can', 'now', 'just', 'will','flight', 
+                'dont', 'ive', 'got', 'much' ,'each','isnt','unit','airline','virgin',
+                'southwestair','americanair','usairway','unit','virginameria','jetblue','fli','amp','dfw','tri','flt')
+
+######################################
+
+# converting text into corpus
+?VCorpus
+
+corpus <- VCorpus(VectorSource((airline_tweets$text))) #save text into corpus
+
+corpus=tm_map(corpus,tolower)
+corpus=tm_map(corpus,PlainTextDocument)
+corpus=tm_map(corpus,removePunctuation)
+corpus=tm_map(corpus,removeNumbers)
+corpus=tm_map(corpus,stripWhitespace)
+corpus=tm_map(corpus,removeWords,stopwords('english'))
+corpus = tm_map(corpus,removeWords, wordsRemove)
+corpus=tm_map(corpus,stemDocument)
+
+#typeof(corpus)
+
+
+# now we create document term matrix
+
+mat <- DocumentTermMatrix(corpus)
+dim(mat)
+
+# find terms which are at least 20 times and above
+findFreqTerms(mat, lowfreq =20)
+
+#Remove the sparse terms from the documnt.This makes a matrix that is little empty space
+Sparse_senti=removeSparseTerms(mat,0.98)
+
+# creating a dataframe from it
+SparseDF=as.data.frame(as.matrix(Sparse_senti))
+colnames(SparseDF) = make.names(colnames(SparseDF))
+
+SparseDF$sentiment=airline_tweets$airline_sentiment
+
+################################# Data preparation for Modeling #################
+table(airline_tweets$airline_sentiment)
+
+SparseDF$sentiment=as.factor(as.character(SparseDF$sentiment))
+#SparseDF$sentiment
+##SparseDF$sentiment=relevel(SparseDF$sentiment,ref = "-1") didnt understand
+
+# splitting the data into 75% - 25% ratio
+
+set.seed(123)
+split=sample.split(airline_tweets$airline_sentiment,SplitRatio = 0.75)
+
+# creating training and test data
+
+Train_airline=subset(SparseDF,split==T)
+Test_airline=subset(SparseDF,split==F)
+
+
+########################## Modeling ##################################
+
+#Multinominal Modelling on Training Data
+tweetmultnmodel=multinom(sentiment~.,data=Train_airline)
+
+#predicting with multinomial model on training Data
+predictmultinomTrain=predict(tweetmultnmodel,newdata=Train_airline)
+
+#confusion matrix
+table(Train_airline$sentiment,predictmultinomTrain)
+
+# optput is for multinomial
+
+#          predictmultinomTrain
+#        negative neutral positive
+#negative     6401     267      216
+#neutral      1830     334      160
+#positive      845      74      853
+
+#Accuracy on Training data
+#(6401+334+853)/(6401+267+261+1830+334+160+845+74+853)
+# 68.82
+
+#         predictmultinomTrain
+#negative positive
+#negative     6663      221
+#positive      823      949
+
+#(6663 + 949)/(6663 +221 +823 +949)
+
+# 87.93
+
+
+############ on Test Data
+
+#Predicting the accuracy of modelling on testing data set
+predictmultinomTest=predict(tweetmultnmodel,newdata=Test_airline)
+#confusion matrix test
+table(Test_airline$sentiment,predictmultinomTest)
+
+#Accuracy on test data set
+
+          #predictmultinomTest
+          #negative neutral positive
+#negative     2105     115       74
+#neutral       589     122       64
+#positive      302      20      269
+
+
+#(2105+122+269)/(2105+115+74+589+122+64+302+20+269)
+#70.13% accuracy on test data
+
+# for positive negative
+
+#         predictmultinomTest
+          #negative positive
+#negative     2208       86
+#positive      298      293
+
+#(2208+293)/(2208+293+298+86)
+
+# 86.68%
+
+# Applying Random Forest model
+
+Train_airline$sentiment=as.factor(Train_airline$sentiment)
+Test_airline$sentiment=as.factor(Test_airline$sentiment)
+
+tweetRFmodel<-randomForest(sentiment ~., data = Train_airline,nodesize = 25,ntree=200)
+# testing the model with test data
+predictRFmodel = predict(tweetRFmodel,newdata= Test_airline)
+
+table(Test_airline$sentiment,predictRFmodel)
+
+#           predictRFmodel
+#           negative neutral positive
+#negative     2236       7       51
+#neutral       715      11       49
+#positive      341      11      239
+
+# Accuracy 
+#(2236+11+239)/(2236+7+51+715+11+49+341+11+239)
+#.6792
+# with 2 variables
+          #predictRFmodel
+          #negative positive
+#negative     2212       82
+#positive      300      291
+
+#(2212+291)/(2212+291+300+82)
+#86.75
+
+
+# Applying Decision Tree model
+
+tweetLog = glm(sentiment ~ ., data = Train_airline,family = binomial)
+
+predictLog = predict(tweetLog, newdata=Test_airline, type="response")
+
+table(Test_airline$sentiment,predictLog>0.5)
+           #FALSE TRUE
+#negative  2208   86
+#positive   298  293
+
+# (2208+293)/(2208+293+298+86)
+
+
+
+##############################################################################################
+######################################### Unsupervised learning #########################
+mat <- DocumentTermMatrix(corpus)
+# weighted ifidf
+
+mat4 <- weightTfIdf(mat)
+mat4 <- as.matrix(mat4)
+
+# we calculate 
+
+k=20
+lda = LDA(mat,k)
+### implementing some unsupervised learning by clustering
+# first we calculate the similarity by calculating the eucleadien distance
+
+norm_eucl <- function(m)
+  m/apply(m,1,function(x) sum(x^2)^.5)
+
+
+mat_norm <- norm_eucl(mat4)
+
+set.seed(5)
+k <- 3
+kmeansResult <- kmeans(mat_norm, k)
+
+count(kmeansResult$cluster)
+
+result = data.frame('actual'=c(train$airline_sentiment,test$airline_sentiment),'predicted' = kmeansResult$cluster)
+result <- result[order(result[,1]),]
+result$counter <- 1
+result.agg <- aggregate(counter~actual+predicted, data=result, FUN='sum')
+
+result.agg
+
+View(result)
+
+library(ggplot2)
+
+ggplot(data=result.agg, aes(x=actual, y=predicted, size=counter)) + geom_point()
+
+#### need to check this, output is not as expected
+
+##### Supervised learning
+
+
+# using Naive Bayes model
+
+classed = naiveBayes(mat4[1:8000,], train$airline_sentiment[1:8000])
+predict <- predict(classed, mat4[8000:11514,])
+table(as.character(train$airline_sentiment[8000:11514]), as.character(predict))
+
+# using decision tree model
+
+View(mat)
+
+container <- create_container(dtm, train$airline_sentiment,trainSize=1:8000,testSize=8001:11514,virgin=FALSE)
+model <- train_model(container, 'TREE',kernel='linear')
+results <- classify_model(container, model)
+table(as.character(train$airline_sentiment[8000:11514]), as.character(results[,"TREE_LABEL"]))
+
+recall_accuracy(train$airline_sentiment[8000:11514], results[,"TREE_LABEL"])
+
+# using SVMs
+
+container <- create_container(dtm, train$airline_sentiment, trainSize=1:8000,testSize=8001:11514, virgin=FALSE)
+model <- train_model(container, 'SVM',kernel='linear')
+results <- classify_model(container, model)
+table(as.character(train$airline_sentiment[8000:11514]), as.character(results[,"SVM_LABEL"]))
+recall_accuracy(train$airline_sentiment[8000:11514], results[,"SVM_LABEL"])
+
+recall_accuracy(as.character(train$airline_sentiment[8000:11514]), as.character(predict))
